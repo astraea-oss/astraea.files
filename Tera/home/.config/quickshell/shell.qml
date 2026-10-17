@@ -26,7 +26,8 @@ ShellRoot {
     // and reserves its width so tiled windows start at its right edge.
     property bool notificationsPinned: false
     onNotificationsPinnedChanged: columnWidthSync.restart()
-    property bool dnd: false
+    // Per-device; never synchronised. Persisted so a shell reload keeps it.
+    property alias dnd: notificationState.dnd
     property bool mediaOpen: false
     property bool calendarOpen: false
     property bool powerOpen: false
@@ -58,7 +59,9 @@ ShellRoot {
     property var now: new Date()
     property string nowPlaying: "Nothing playing"
     property string notifications: ""
-    property var notificationTimes: ({})
+    // Arrival times in ms, keyed by notification id; reloads keep the original time.
+    readonly property var notificationTimes: JSON.parse(notificationState.times)
+    readonly property var notificationHistory: notificationServer.trackedNotifications.values.filter(n => !n.transient)
     readonly property int notificationPopupDuration: 6250
     readonly property int notificationPopupFade: 1000
     property bool notificationSoundEnabled: true
@@ -149,6 +152,24 @@ ShellRoot {
             if (notificationPopups.get(i).notificationId === notificationId)
                 notificationPopups.remove(i);
         }
+    }
+    // Keep a notification in the centre. Pass an arrival time only for a fresh
+    // arrival (or a canonical shared time); a reloaded entry passes none so it
+    // keeps its recorded time instead of taking the reload time.
+    function retainNotification(notification, timestamp) {
+        if (timestamp !== undefined) {
+            let times = Object.assign({}, root.notificationTimes);
+            times[notification.id] = timestamp;
+            notificationState.times = JSON.stringify(times);
+        }
+        notification.tracked = true;
+    }
+    // Expire, rather than dismiss, transients that no longer have a popup.
+    function releaseTransients() {
+        let shown = new Set();
+        for (let i = 0; i < notificationPopups.count; i++) shown.add(notificationPopups.get(i).notificationId);
+        for (const notification of [...notificationServer.trackedNotifications.values])
+            if (notification.transient && !shown.has(notification.id)) notification.expire();
     }
     function showNotificationPopup(notification) {
         removeNotificationPopup(notification.id);
@@ -362,30 +383,42 @@ ShellRoot {
         function toggleNetwork(): void { root.toggle("networkOpen"); }
         function closePanels(): void { root.closePanels(); }
     }
-    ListModel { id: notificationPopups }
+    ListModel { id: notificationPopups; onCountChanged: Qt.callLater(root.releaseTransients) }
+
+    // Survives shell reloads (not a full Quickshell restart).
+    PersistentProperties {
+        id: notificationState
+        reloadableId: "emberNotificationState"
+        property bool dnd: false
+        // JSON text: JS objects in a var do not carry across a reload.
+        property string times: "{}"
+    }
 
     NotificationServer {
         id: notificationServer
         persistenceSupported: true
         actionsSupported: true
         bodyMarkupSupported: true
+        // dismiss() is reserved for explicit user closure (Clear and the
+        // per-entry button); presentation choices such as DND must never call it.
         onNotification: notification => {
-            // Reloaded history must not replay popups or chimes.
+            // Deferred for every path, including reload: transients restored
+            // without a popup must still expire once restoration finishes.
+            Qt.callLater(root.releaseTransients);
+            // Reloaded history keeps its arrival time and must not replay popups or chimes.
             if (notification.lastGeneration) {
-                notification.tracked = true;
+                root.retainNotification(notification);
                 return;
             }
-            if (root.dnd) {
-                notification.dismiss();
-            } else {
-                let times = Object.assign({}, root.notificationTimes);
-                times[notification.id] = new Date();
-                root.notificationTimes = times;
-                notification.tracked = true;
-                root.showNotificationPopup(notification);
-                if (root.notificationSoundEnabled && !notification.hints["suppress-sound"] && !notificationChime.running)
-                    notificationChime.running = true;
-            }
+            // Transients stay out of history but are tracked while their popup
+            // shows: Quickshell reports an untracked notification as dismissed.
+            if (notification.transient) notification.tracked = true;
+            else root.retainNotification(notification, Date.now());
+            // DND only suppresses presentation, including critical urgency for now.
+            if (root.dnd) return;
+            root.showNotificationPopup(notification);
+            if (root.notificationSoundEnabled && !notification.hints["suppress-sound"] && !notificationChime.running)
+                notificationChime.running = true;
         }
     }
 
@@ -536,7 +569,7 @@ ShellRoot {
                 EmberButton { width: root.barWidth; height: 32; glyph: root.ethernetIcon(); glyphColor: root.ethernetState === "connected" ? root.rose : root.muted; iconSize: 15; chrome: false; compact: true; onPressed: root.toggle("networkOpen") }
                 EmberButton { width: root.barWidth; height: 32; glyph: "󰂯"; glyphColor: root.bluetooth === "Bluetooth on" ? root.rose : root.muted; iconSize: 14; chrome: false; compact: true; onPressed: root.toggle("bluetoothOpen") }
                 EmberButton { width: root.barWidth; height: 32; glyph: root.volumeIcon(); glyphColor: root.rose; iconSize: 14; chrome: false; compact: true; onPressed: root.toggle("audioOpen") }
-                EmberButton { width: root.barWidth; height: 32; glyph: "󰂚"; label: notificationServer.trackedNotifications.values.length > 0 ? notificationServer.trackedNotifications.values.length : ""; glyphColor: root.muted; iconSize: 14; chrome: false; compact: true; onPressed: root.toggle("notificationsOpen") }
+                EmberButton { width: root.barWidth; height: 32; glyph: root.dnd ? "󰂛" : "󰂚"; label: root.notificationHistory.length > 0 ? root.notificationHistory.length : ""; glyphColor: root.muted; iconSize: 14; chrome: false; compact: true; onPressed: root.toggle("notificationsOpen") }
                 EmberButton { width: root.barWidth; height: 32; glyph: "󰐥"; glyphColor: root.hot; iconSize: 14; chrome: false; compact: true; onPressed: root.toggle("powerOpen") }
             }
         }
@@ -779,7 +812,7 @@ ShellRoot {
                 EmberButton { glyph: "󰂯"; label: root.bluetooth; Layout.fillWidth: true; onPressed: root.launch("blueman-manager") }
                 Rectangle { Layout.fillWidth: true; height: 1; color: root.outline }
                 Item { Layout.fillHeight: true }
-                EmberButton { glyph: "󰒓"; label: "Do not disturb / notifications"; Layout.fillWidth: true; onPressed: root.run("swaync-client -d") }
+                EmberButton { glyph: root.dnd ? "󰂛" : "󰂚"; label: root.dnd ? "Do not disturb: on" : "Do not disturb: off"; active: root.dnd; Layout.fillWidth: true; onPressed: root.dnd = !root.dnd }
             }
         }
     }
@@ -809,7 +842,7 @@ ShellRoot {
                 RowLayout { Layout.fillWidth: true
                     Text { text: "NOTIFICATIONS"; color: root.hot; font.bold: true; font.family: root.uiFont; font.pixelSize: 13; Layout.fillWidth: true }
                     EmberButton { glyph: root.notificationsPinned ? "󰐃" : "󰐄"; glyphColor: root.notificationsPinned ? root.hot : root.rose; active: root.notificationsPinned; onPressed: root.notificationsPinned = !root.notificationsPinned }
-                    EmberButton { glyph: "󰎟"; label: "Clear"; onPressed: { let all = notificationServer.trackedNotifications.values; for (let i = 0; i < all.length; i++) all[i].dismiss() } }
+                    EmberButton { glyph: "󰎟"; label: "Clear"; onPressed: { let all = root.notificationHistory; for (let i = 0; i < all.length; i++) all[i].dismiss() } }
                 }
                 RowLayout { Layout.fillWidth: true
                     Text { text: "Do Not Disturb"; color: root.rose; font.family: root.uiFont; font.pixelSize: 12; Layout.fillWidth: true }
@@ -820,7 +853,7 @@ ShellRoot {
                     id: notificationList
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 7
                     // Newest first; the server tracks notifications in arrival order.
-                    model: [...notificationServer.trackedNotifications.values].reverse()
+                    model: [...root.notificationHistory].reverse()
                     delegate: Rectangle {
                         required property var modelData
                         width: notificationList.width; implicitHeight: notificationBody.implicitHeight + 20; radius: 4
