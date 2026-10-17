@@ -382,8 +382,6 @@ ShellRoot {
         }
         function toggleNetwork(): void { root.toggle("networkOpen"); }
         function closePanels(): void { root.closePanels(); }
-        function toggleDnd(): void { root.dnd = !root.dnd; }
-        function dndEnabled(): bool { return root.dnd; }
     }
     ListModel { id: notificationPopups; onCountChanged: Qt.callLater(root.releaseTransients) }
 
