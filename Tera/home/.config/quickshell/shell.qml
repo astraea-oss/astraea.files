@@ -402,6 +402,9 @@ ShellRoot {
         // dismiss() is reserved for explicit user closure (Clear and the
         // per-entry button); presentation choices such as DND must never call it.
         onNotification: notification => {
+            // Deferred for every path, including reload: transients restored
+            // without a popup must still expire once restoration finishes.
+            Qt.callLater(root.releaseTransients);
             // Reloaded history keeps its arrival time and must not replay popups or chimes.
             if (notification.lastGeneration) {
                 root.retainNotification(notification);
@@ -411,7 +414,6 @@ ShellRoot {
             // shows: Quickshell reports an untracked notification as dismissed.
             if (notification.transient) notification.tracked = true;
             else root.retainNotification(notification, Date.now());
-            Qt.callLater(root.releaseTransients);
             // DND only suppresses presentation, including critical urgency for now.
             if (root.dnd) return;
             root.showNotificationPopup(notification);
