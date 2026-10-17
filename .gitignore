@@ -1,0 +1,20 @@
+# Local credentials and machine-only overrides
+.env
+.env.*
+*.local
+secrets/
+
+# Editor, OS, and transient files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# Historical snapshots made beside live configs
+*.before-*
+*.bak
+*.backup
+
+# Quickshell records recently launched applications here at runtime
+**/home/.config/quickshell/launcher-history.ini

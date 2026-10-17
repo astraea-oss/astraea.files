@@ -1,0 +1,54 @@
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/master/doc/json_schema.json",
+  "logo": {
+    "type": "kitty",
+    "source": "/home/tera/.config/fastfetch/assets/red-eye-logo.png",
+    "width": 24,
+    "height": 12,
+    "preserveAspectRatio": true
+  },
+  "display": {
+    "color": {
+      "keys": "red",
+      "title": "yellow",
+      "output": "bright_red",
+      "separator": "bright_black"
+    },
+    "percent": {
+      "type": 8,
+      "color": {
+        "green": "yellow",
+        "yellow": "bright_red",
+        "red": "red"
+      }
+    }
+  },
+  "modules": [
+    {
+      "type": "custom",
+      "format": "{#31}Welcome home {#33}Tera"
+    },
+    {
+      "type": "custom",
+      "format": "{#1}————————————————"
+    },
+    {
+      "type": "custom",
+      "format": "{#31}OS{#0}: CachyOS"
+    },
+    "uptime",
+    "wm",
+    "terminal",
+    "terminalfont",
+    "cpu",
+    {
+      "type": "custom",
+      "format": "{#31}GPU{#0}: EDIT ME — set your GPU model"
+    },
+    "memory",
+    {
+      "type": "disk",
+      "folders": "/"
+    }
+  ]
+}
