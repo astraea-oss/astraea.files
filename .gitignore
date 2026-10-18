@@ -17,4 +17,4 @@ Thumbs.db
 *.backup
 
 # Quickshell records recently launched applications here at runtime
-**/home/.config/quickshell/launcher-history.ini
+**/home/.config/quickshell/**/launcher-history.ini
