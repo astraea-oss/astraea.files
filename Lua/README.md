@@ -55,14 +55,13 @@ component is included; its backend, credentials, notification history and
 pairing state are not. The bridge is disabled until you enable it through
 edge-kvm's settings or set `EDGE_KVM_NOTIFICATION_SOCKET` explicitly. Standalone
 Quickshell does not retry a missing backend or queue offline closures.
-See [MouseWithoutBorders Quickshell integration](https://github.com/astraea-oss/MouseWithoutBorders/blob/feat/shared-notifications/integrations/quickshell/README.md)
+See [MouseWithoutBorders Quickshell integration](https://github.com/astraea-oss/MouseWithoutBorders/blob/ba391747fc4c2bd90fe4e760c287e2b0c3daf9fd/integrations/quickshell/README.md)
 for setup and supported behaviour.
 
 The review found no obvious embedded credentials, private cloud paths, saved
 network identities or pairing/history databases. Image EXIF/XMP/text metadata
 was removed from the repository copies without re-encoding their image data.
-Live files were not modified. The video wallpaper is not distributed; Hyprpaper
-uses the bundled static wallpaper instead.
+Live files were not modified. Hyprpaper uses the bundled static wallpaper.
 
 Image and font assets retain their third-party rights; see
 [ASSETS.md](../ASSETS.md).
