@@ -20,7 +20,10 @@ not a shared baseline. It contains:
 - Hyprland Lua config and helper modules, Hyprlock, Hyprpaper, and media status
   script.
 - Quickshell shell configuration. Launcher history is runtime data and is
-  excluded from Git.
+  excluded from Git. The edge-kvm notification bridge is included but
+  disabled until edge-kvm's settings install it or
+  `EDGE_KVM_NOTIFICATION_SOCKET` is set; when enabled, centre entries are
+  labelled with their source device, e.g. `discord (Tera)`.
 - Kitty, btop, Fish, and Fastfetch config, including referenced theme files
   and logo.
 - xsettingsd, Flameshot, and Satty settings.

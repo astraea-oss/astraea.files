@@ -392,6 +392,8 @@ ShellRoot {
         property bool dnd: false
         // JSON text: JS objects in a var do not carry across a reload.
         property string times: "{}"
+        property string epoch: ""
+        property string offlineClosures: "[]"
     }
 
     NotificationServer {
@@ -413,12 +415,28 @@ ShellRoot {
             // Transients stay out of history but are tracked while their popup
             // shows: Quickshell reports an untracked notification as dismissed.
             if (notification.transient) notification.tracked = true;
-            else root.retainNotification(notification, Date.now());
+            else root.retainNotification(notification, Number(notification.hints["x-edge-kvm-posted-ms"]) || Date.now());
             // DND only suppresses presentation, including critical urgency for now.
-            if (root.dnd) return;
+            if (root.dnd || notification.hints["x-edge-kvm-replay"]) return;
             root.showNotificationPopup(notification);
             if (root.notificationSoundEnabled && !notification.hints["suppress-sound"] && !notificationChime.running)
                 notificationChime.running = true;
+        }
+    }
+
+    EdgeNotificationBridge {
+        id: edgeNotificationBridge
+        server: notificationServer
+        state: notificationState
+        timestamps: root.notificationTimes
+        // Enable through edge-kvm settings, or provide the socket explicitly.
+        socketPath: Quickshell.env("EDGE_KVM_NOTIFICATION_SOCKET") || ""
+        onEntryClosed: id => {
+            root.removeNotificationPopup(id);
+            if (root.notificationTimes[id] === undefined) return;
+            let times = Object.assign({}, root.notificationTimes);
+            delete times[id];
+            notificationState.times = JSON.stringify(times);
         }
     }
 
@@ -862,7 +880,7 @@ ShellRoot {
                             IconImage { source: Quickshell.iconPath(modelData.appIcon || modelData.desktopEntry); width: 28; height: 28 }
                             ColumnLayout { Layout.fillWidth: true; spacing: 3
                                 RowLayout { Layout.fillWidth: true; spacing: 8
-                                    Text { text: modelData.appName; color: root.muted; font.family: root.uiFont; font.pixelSize: 10; Layout.fillWidth: true; elide: Text.ElideRight }
+                                    Text { text: edgeNotificationBridge.appLabel(modelData); textFormat: Text.PlainText; color: root.muted; font.family: root.uiFont; font.pixelSize: 10; Layout.fillWidth: true; elide: Text.ElideRight }
                                     Text { text: root.notificationTimestamp(root.notificationTimes[modelData.id]); color: root.statusText; font.family: root.uiFont; font.pixelSize: 9; Layout.alignment: Qt.AlignTop }
                                 }
                                 Text { text: modelData.summary; color: root.rose; font.family: root.uiFont; font.bold: true; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
