@@ -1,7 +1,7 @@
 # DotFiles
 
   Each machine gets its own folder:
-   `Tera/` and `Luna/`,
+   `Tera/` and `Lua/`,
 Shared settings can be factored out later, after both machines have been
 inventoried.
 
@@ -38,6 +38,13 @@ wallpaper paths have not been rewritten.
 
 Fish sources CachyOS's installed config at
 `/usr/share/cachyos-fish-config/cachyos-config.fish`.
+
+## Lua
+
+`Lua/` contains the laptop's matching active configuration, dependencies and
+login theme. Its Quickshell setup keeps the laptop's Bluetooth, Wi-Fi, battery
+and per-monitor controls, with the notification centre and popups on the right.
+See [Lua's snapshot notes](Lua/README.md) for paths, dependencies and exclusions.
 
 ## License and third-party assets
 

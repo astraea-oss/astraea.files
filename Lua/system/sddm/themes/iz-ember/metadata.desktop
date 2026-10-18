@@ -1,0 +1,13 @@
+[SddmGreeterTheme]
+Name=Iz Ember
+Description=Red and gold Hyprland-style SDDM theme
+Author=lua + Codex
+Copyright=2026
+License=MIT
+Type=sddm-theme
+Version=1.0
+MainScript=Main.qml
+ConfigFile=theme.conf
+Theme-Id=iz-ember
+Theme-API=2.0
+QtVersion=6
