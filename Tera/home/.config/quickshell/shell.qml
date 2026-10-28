@@ -519,7 +519,7 @@ ShellRoot {
                 Text { text: entry.app.genericName || entry.app.comment; color: root.muted; font.family: root.uiFont; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
             }
         }
-        MouseArea { id: entryMouse; anchors.fill: parent; hoverEnabled: true; onEntered: root.launcherIndex = entry.entryIndex; onClicked: root.launchApp(entry.app) }
+        MouseArea { id: entryMouse; anchors.fill: parent; hoverEnabled: true; onClicked: root.launchApp(entry.app) }
     }
 
     PanelWindow {
@@ -782,10 +782,10 @@ ShellRoot {
                     color: root.rose; font.family: root.uiFont; font.pixelSize: 16
                     clip: true
                     text: root.launcherQuery
-                    onTextChanged: { root.launcherQuery = text; root.launcherIndex = 0 }
+                    onTextChanged: { root.launcherQuery = text; root.launcherIndex = 0; launcherList.positionViewAtBeginning() }
                     Keys.onEscapePressed: { root.launcherOpen = false; root.launcherQuery = "" }
-                    Keys.onDownPressed: root.launcherIndex = Math.min(root.launcherApps.length - 1, root.launcherIndex + 1)
-                    Keys.onUpPressed: root.launcherIndex = Math.max(0, root.launcherIndex - 1)
+                    Keys.onDownPressed: launcherList.reveal(root.launcherIndex = Math.min(root.launcherApps.length - 1, root.launcherIndex + 1))
+                    Keys.onUpPressed: launcherList.reveal(root.launcherIndex = Math.max(0, root.launcherIndex - 1))
                     Keys.onReturnPressed: { if (root.launcherApps.length > 0) root.launchApp(root.launcherApps[root.launcherIndex]) }
                     Text { visible: !launcherInput.text; anchors.verticalCenter: parent.verticalCenter; text: "Search applications…"; color: root.muted; font.family: root.uiFont; font.pixelSize: 16 }
                     Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: root.hot }
@@ -803,11 +803,11 @@ ShellRoot {
                     Layout.maximumHeight: launcherCard.listHeight
                     Layout.alignment: Qt.AlignTop
                     model: root.launcherRest
-                    currentIndex: Math.max(0, root.launcherIndex - root.launcherTopCount)
                     clip: true; spacing: 0
-                    interactive: false
-                    highlightRangeMode: ListView.StrictlyEnforceRange
+                    boundsBehavior: Flickable.StopAtBounds
                     snapMode: ListView.SnapToItem
+                    // Scroll only as far as needed to show a keyboard selection; hover never scrolls.
+                    function reveal(i) { if (i >= root.launcherTopCount) positionViewAtIndex(i - root.launcherTopCount, ListView.Contain) }
                     delegate: LauncherEntry { app: modelData; entryIndex: index + root.launcherTopCount }
                 }
             }
