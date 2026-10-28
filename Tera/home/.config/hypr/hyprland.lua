@@ -202,8 +202,9 @@ for workspace = 1, 8 do
     hl.bind(main_mod .. " + SHIFT + " .. workspace, hl.dsp.window.move({ workspace = workspace }))
 end
 
-hl.bind(main_mod .. " + S", hl.dsp.workspace.toggle_special("magic"))
-hl.bind(main_mod .. " + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }))
+-- Scratchpad shortcuts disabled for now to avoid accidental overlays.
+-- hl.bind(main_mod .. " + S", hl.dsp.workspace.toggle_special("magic"))
+-- hl.bind(main_mod .. " + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }))
 hl.bind(main_mod .. " + mouse_down", hl.dsp.focus({ workspace = "e+1" }))
 hl.bind(main_mod .. " + mouse_up", hl.dsp.focus({ workspace = "e-1" }))
 hl.bind(main_mod .. " + mouse:272", hl.dsp.window.drag(), { mouse = true })
