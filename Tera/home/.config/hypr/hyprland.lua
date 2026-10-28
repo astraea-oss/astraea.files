@@ -304,3 +304,48 @@ hl.window_rule({
     match = { class = "^(steam_app_238960)$" },
     opacity = "1.0 override 1.0 override",
 })
+
+-- Endfield's login UI is a separate Wine window, not a scrolling column.
+hl.window_rule({
+    name = "endfield-login-popup",
+    match = { class = "^steam_app_4732690$", title = "^UIPlatform$" },
+    float = true,
+    center = true,
+    size = "1000 800",
+    border_size = 0,
+    opacity = "1.0 override 1.0 override",
+})
+
+hl.window_rule({
+    name = "endfield-game-opaque",
+    match = { class = "^steam_app_4732690$", title = "^Endfield$" },
+    opacity = "1.0 override 1.0 override",
+})
+
+-- Override the workspace-2 inbox for this popup using the game's actual
+-- workspace, so this also works if the game is moved to another workspace.
+local function place_endfield_login(popup)
+    if popup.class ~= "steam_app_4732690" or popup.title ~= "UIPlatform" then
+        return
+    end
+    for _, game in ipairs(hl.get_windows({ class = "steam_app_4732690" })) do
+        if game.title == "Endfield" and game.pid == popup.pid and game.workspace then
+            hl.dispatch(hl.dsp.window.float({ action = "set", window = popup }))
+            if not popup.workspace or popup.workspace.id ~= game.workspace.id then
+                hl.dispatch(hl.dsp.window.move({ window = popup, workspace = game.workspace, follow = false }))
+            end
+            hl.dispatch(hl.dsp.window.center({ window = popup }))
+            hl.dispatch(hl.dsp.window.bring_to_top({ window = popup }))
+            return
+        end
+    end
+end
+
+hl.on("window.open", place_endfield_login)
+hl.on("window.move_to_workspace", function(window)
+    if window.class == "steam_app_4732690" and window.title == "Endfield" then
+        for _, popup in ipairs(hl.get_windows({ class = "steam_app_4732690" })) do
+            place_endfield_login(popup)
+        end
+    end
+end)
