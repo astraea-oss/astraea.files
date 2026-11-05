@@ -314,6 +314,9 @@ hl.window_rule({
     size = "1000 800",
     border_size = 0,
     opacity = "1.0 override 1.0 override",
+    -- Wine asks to fullscreen the popup too; the game and popup then steal
+    -- fullscreen from each other in a loop. Floating already draws above it.
+    suppress_event = "fullscreen maximize",
 })
 
 hl.window_rule({
@@ -330,12 +333,15 @@ local function place_endfield_login(popup)
     end
     for _, game in ipairs(hl.get_windows({ class = "steam_app_4732690" })) do
         if game.title == "Endfield" and game.pid == popup.pid and game.workspace then
-            hl.dispatch(hl.dsp.window.float({ action = "set", window = popup }))
+            -- Only "enable"/"on" are idempotent; any other action toggles,
+            -- which would re-tile the popup the float rule already floated.
+            hl.dispatch(hl.dsp.window.float({ action = "enable", window = popup }))
             if not popup.workspace or popup.workspace.id ~= game.workspace.id then
                 hl.dispatch(hl.dsp.window.move({ window = popup, workspace = game.workspace, follow = false }))
             end
             hl.dispatch(hl.dsp.window.center({ window = popup }))
-            hl.dispatch(hl.dsp.window.bring_to_top({ window = popup }))
+            -- bring_to_top() takes no arguments (active window only).
+            hl.dispatch(hl.dsp.window.alter_zorder({ mode = "top", window = popup }))
             return
         end
     end
