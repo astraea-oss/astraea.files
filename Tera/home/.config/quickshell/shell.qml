@@ -871,7 +871,9 @@ ShellRoot {
                     id: notificationList
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 7
                     // Newest first; the server tracks notifications in arrival order.
-                    model: [...root.notificationHistory].reverse()
+                    // ScriptModel diffs the array, so dismissing one entry removes just that
+                    // row instead of resetting the view (and scroll position) to the top.
+                    model: ScriptModel { values: [...root.notificationHistory].reverse() }
                     delegate: Item {
                         required property var modelData
                         width: notificationList.width; implicitHeight: notificationBody.implicitHeight + 20
