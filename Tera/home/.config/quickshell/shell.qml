@@ -876,7 +876,7 @@ ShellRoot {
                         required property var modelData
                         width: notificationList.width; implicitHeight: notificationBody.implicitHeight + 20; radius: 4
                         color: root.surfaceRaised; border.color: "#5e0e22"
-                        RowLayout { id: notificationBody; anchors { left: parent.left; right: parent.right; top: parent.top; margins: 10 } spacing: 9
+                        RowLayout { id: notificationBody; anchors { left: parent.left; right: parent.right; top: parent.top; margins: 10; rightMargin: 37 } spacing: 9
                             IconImage { source: Quickshell.iconPath(modelData.appIcon || modelData.desktopEntry); width: 28; height: 28 }
                             ColumnLayout { Layout.fillWidth: true; spacing: 3
                                 RowLayout { Layout.fillWidth: true; spacing: 8
@@ -886,8 +886,10 @@ ShellRoot {
                                 Text { text: modelData.summary; color: root.rose; font.family: root.uiFont; font.bold: true; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
                                 Text { visible: modelData.body.length > 0; text: modelData.body; color: root.muted; font.family: root.uiFont; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
                             }
-                            EmberButton { glyph: "󰅖"; compact: true; onPressed: modelData.dismiss() }
                         }
+                        // Full-height dismiss strip along the card's right edge: same footprint
+                        // as the old inline button, but the whole column is clickable.
+                        EmberButton { glyph: "󰅖"; compact: true; width: 33; anchors { top: parent.top; bottom: parent.bottom; right: parent.right; margins: 1 } onPressed: modelData.dismiss() }
                     }
                     Text { anchors.centerIn: parent; visible: notificationList.count === 0; text: "Nothing to see here"; color: root.muted; font.family: root.uiFont; font.pixelSize: 13 }
                 }
