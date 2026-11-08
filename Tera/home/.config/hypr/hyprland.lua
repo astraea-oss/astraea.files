@@ -60,6 +60,9 @@ hl.env("HYPRCURSOR_SIZE", "24")
 -----------------------
 
 hl.config({
+    -- Avoid fullscreen HDR switching on the 8-bit desktop (blackout/color warning).
+    render = { cm_auto_hdr = 0 },
+
     cursor = {
         no_hardware_cursors = true,
         hotspot_padding = 2,
