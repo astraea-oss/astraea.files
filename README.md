@@ -2,13 +2,8 @@
 
   Each machine gets its own folder:
    `Tera/` and `Lua/`,
-Shared settings can be factored out later, after both machines have been
-inventoried.
 
 ## Tera
-
-`Tera/` is a snapshot of selected active configuration files and dependencies,
-not a shared baseline. It contains:
 
 - `home/.config/`: selected active files mirroring `~/.config/`.
 - `assets/`: desktop wallpapers and font files used by the setup.
@@ -19,11 +14,6 @@ not a shared baseline. It contains:
 
 - Hyprland Lua config and helper modules, Hyprlock, Hyprpaper, and media status
   script.
-- Quickshell shell configuration. Launcher history is runtime data and is
-  excluded from Git. The edge-kvm notification bridge is included but
-  disabled until edge-kvm's settings install it or
-  `EDGE_KVM_NOTIFICATION_SOCKET` is set; when enabled, centre entries are
-  labelled with their source device, e.g. `discord (Tera)`.
 - Kitty, btop, Fish, and Fastfetch config, including referenced theme files
   and logo.
 - xsettingsd, Flameshot, and Satty settings.
@@ -31,9 +21,6 @@ not a shared baseline. It contains:
 
 ### Machine-specific notes
 
-GPU and monitor-specific values have been replaced with obvious `EDIT ME`
-placeholders in the example configs, including the monitor helper and
-Quickshell display selection. Hyprland will use preferred
 display modes until you add monitor blocks based on `hyprctl monitors`. Several
 files contain `/home/tera` paths. Hyprpaper/Hyprlock point under
 `/home/tera/Pictures/`. Copies are also preserved in `Tera/assets/`; those
@@ -44,8 +31,8 @@ Fish sources CachyOS's installed config at
 
 ## Lua
 
-`Lua/` contains the laptop's matching active configuration, dependencies and
-login theme. Its Quickshell setup keeps the laptop's Bluetooth, Wi-Fi, battery
+`Lua/` active configuration, dependencies and login theme. 
+Its Quickshell setup keeps the laptop's Bluetooth, Wi-Fi, battery
 and per-monitor controls, with the notification centre and popups on the right.
 See [Lua's snapshot notes](Lua/README.md) for paths, dependencies and exclusions.
 
