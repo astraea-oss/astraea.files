@@ -52,6 +52,18 @@ ShellRoot {
     property string vpnRegion: "--"
     property string vpnAddress: "--"
     property string pingLatency: "--"
+    // Tailscale, filled by tailscalePoll. tsState is the daemon's BackendState
+    // (Running, Stopped, NeedsLogin, Starting) or "Off" when tailscaled is down.
+    property string tsState: "Off"
+    property string tsAddress: "--"
+    property string tsHost: ""
+    property string tsAuthUrl: ""
+    property bool tsDns: false
+    property string tsOperator: ""
+    property bool tsPrefsKnown: false
+    property var tsPeers: []
+    readonly property bool tsRunning: tsState === "Running"
+    readonly property string userName: Quickshell.env("USER") || ""
     readonly property int barWidth: 40
     readonly property int panelGap: 16
     readonly property int notificationPanelWidth: 360
@@ -124,6 +136,21 @@ ShellRoot {
     function run(command) { actionRunner.exec(["sh", "-c", command]); }
     function launch(command) { Quickshell.execDetached(["sh", "-c", command]); }
     function copyToClipboard(value) { if (value && value !== "--") clipboardRunner.exec(["wl-copy", value]); }
+    // Tailscale changes need root unless this user is the tailscale operator;
+    // fall back to a polkit prompt so the panel works either way.
+    function tsRun(args) { root.run("tailscale " + args + " || pkexec tailscale " + args); }
+    // `up` can block until a browser login finishes, so it runs detached and
+    // the login link appears in the panel via tailscalePoll.
+    function tsUp() {
+        root.launch("systemctl is-active -q tailscaled || systemctl start tailscaled || exit 1; tailscale up || pkexec tailscale up");
+        tailscaleRefresh.restart();
+    }
+    function tsDetail() {
+        if (tsState === "Off") return "Service stopped · switch on to start";
+        if (tsState === "NeedsLogin") return "Needs login · open the link below";
+        if (tsState === "Running") return (tsHost || "Connected") + " · " + tsPeers.filter(p => p.online).length + "/" + tsPeers.length + " devices online";
+        return tsState;
+    }
     function shortAudioName(name) {
         if (name.includes("Speaker")) return "Laptop speakers";
         if (name.includes("Digital Microphone")) return "Digital microphone";
@@ -312,6 +339,43 @@ ShellRoot {
         running: true
     }
     Process {
+        id: tailscalePoll
+        // Three lines: service state, prefs JSON, status JSON (either JSON may be empty).
+        command: ["sh", "-c", `systemctl is-active tailscaled 2>/dev/null | head -1
+tailscale debug prefs 2>/dev/null | jq -c '{dns: .CorpDNS, operator: (.OperatorUser // "")}' 2>/dev/null || echo
+tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.AuthURL // ""), host: (.Self.HostName // ""), ip: ((.Self.TailscaleIPs // [])[0] // ""), peers: ([(.Peer // {})[] | {name: .HostName, ip: ((.TailscaleIPs // [])[0] // ""), online: (.Online // false), os: (.OS // "")}] | sort_by([(.online | not), (.name | ascii_downcase)]))}' 2>/dev/null || echo`]
+        stdout: StdioCollector { onStreamFinished: {
+            let lines = text.split("\n");
+            let service = (lines[0] || "").trim();
+            let prefs = null, status = null;
+            try { prefs = lines[1] ? JSON.parse(lines[1]) : null } catch (e) {}
+            try { status = lines[2] ? JSON.parse(lines[2]) : null } catch (e) {}
+            root.tsPrefsKnown = prefs !== null;
+            root.tsDns = prefs ? prefs.dns === true : false;
+            root.tsOperator = prefs ? prefs.operator : "";
+            if (service !== "active" || !status) {
+                root.tsState = "Off"; root.tsAddress = "--"; root.tsHost = ""; root.tsAuthUrl = ""; root.tsPeers = [];
+                return;
+            }
+            root.tsState = status.state || "Off";
+            root.tsAddress = status.ip || "--";
+            root.tsHost = status.host;
+            root.tsAuthUrl = status.auth;
+            root.tsPeers = status.peers;
+        }}
+        running: true
+    }
+    Timer {
+        id: tailscaleRefresh
+        interval: 1500; repeat: false
+        onTriggered: if (!tailscalePoll.running) tailscalePoll.running = true
+    }
+    // Poll fast while the panel is open (to catch logins), slowly otherwise.
+    Timer {
+        interval: root.networkOpen ? 3000 : 15000; running: true; repeat: true
+        onTriggered: if (!tailscalePoll.running) tailscalePoll.running = true
+    }
+    Process {
         id: workspacePoll
         command: ["sh", "-c", "hyprctl activeworkspace -j 2>/dev/null | sed -n 's/.*\\\"id\\\": *\\([0-9]*\\).*/\\1/p'" ]
         stdout: StdioCollector { onStreamFinished: { let n = Number(text.trim()); if (n > 0) root.activeWorkspace = n } }
@@ -341,6 +405,7 @@ ShellRoot {
             if (!bluetoothDevicePoll.running) bluetoothDevicePoll.running = true;
             if (!audioDevicePoll.running) audioDevicePoll.running = true;
             if (!networkDetailsPoll.running) networkDetailsPoll.running = true;
+            if (!tailscalePoll.running) tailscalePoll.running = true;
         }
     }
     Timer {
@@ -949,9 +1014,9 @@ ShellRoot {
 
     PanelWindow {
         visible: root.networkOpen; screen: bar.screen; anchors { top: true; left: true }
-        margins { left: root.panelGap } exclusiveZone: 0; focusable: false; implicitWidth: 360; implicitHeight: 286; color: "transparent"
+        margins { left: root.panelGap } exclusiveZone: 0; focusable: false; implicitWidth: 360; implicitHeight: networkColumn.implicitHeight + 28; color: "transparent"
         Rectangle { anchors.fill: parent; radius: 0; color: "#f00e0207"; border.color: "transparent"
-            ColumnLayout { anchors.fill: parent; anchors.margins: 14; spacing: 8
+            ColumnLayout { id: networkColumn; anchors.fill: parent; anchors.margins: 14; spacing: 8
                 Text { text: "NETWORK"; color: root.hot; font.family: root.uiFont; font.bold: true; font.pixelSize: 12 }
                 Text { text: root.ethernetState === "connected" ? root.ethernetConnection : "Ethernet disconnected"; color: root.rose; font.family: root.uiFont; font.pixelSize: 16 }
                 EmberButton { glyph: "󰈀"; label: "Wired network settings"; Layout.fillWidth: true; onPressed: root.launch("nm-connection-editor") }
@@ -978,6 +1043,39 @@ ShellRoot {
                 RowLayout { Layout.fillWidth: true
                     Text { text: "Latency  1.1.1.1"; color: root.muted; font.family: root.uiFont; font.pixelSize: 11; Layout.fillWidth: true }
                     Text { text: root.pingLatency; color: root.amber; font.family: root.uiFont; font.pixelSize: 11 }
+                }
+                Rectangle { Layout.fillWidth: true; height: 1; color: root.outline }
+                RowLayout { Layout.fillWidth: true
+                    Text { text: "TAILSCALE"; color: root.hot; font.family: root.uiFont; font.bold: true; font.pixelSize: 12; Layout.fillWidth: true }
+                    EmberButton { glyph: "󰒓"; label: "Admin"; compact: true; onPressed: root.launch("xdg-open https://login.tailscale.com/admin/machines") }
+                }
+                EmberToggle { label: "Tailscale"; detail: root.tsDetail(); checked: root.tsRunning
+                    onToggled: function(value) { if (value) root.tsUp(); else root.tsRun("down"); }
+                }
+                EmberButton { visible: root.tsAuthUrl.length > 0; glyph: "󰌆"; label: "Open login link"; Layout.fillWidth: true; onPressed: root.launch("xdg-open '" + root.tsAuthUrl + "'") }
+                // MagicDNS rewrites resolv.conf and clashes with PIA's DNS; keep it off while PIA is on.
+                EmberToggle { visible: root.tsState !== "Off"; label: "MagicDNS"
+                    detail: root.tsDns ? (root.vpnState === "Connected" ? "On · may break DNS while PIA is connected" : "On · device names resolve") : "Off · use 100.x addresses"
+                    checked: root.tsDns
+                    onToggled: function(value) { root.tsRun("set --accept-dns=" + value); }
+                }
+                EmberButton { visible: root.tsState !== "Off" && root.tsPrefsKnown && root.tsOperator !== root.userName; glyph: "󰌾"; label: "Allow control without password"; Layout.fillWidth: true; onPressed: root.run("pkexec tailscale set --operator=" + root.userName) }
+                RowLayout { visible: root.tsRunning; Layout.fillWidth: true
+                    Text { text: "This device"; color: root.muted; font.family: root.uiFont; font.pixelSize: 11; Layout.fillWidth: true }
+                    Text { text: root.tsAddress; color: tsAddressMouse.containsMouse ? root.hot : root.rose; font.family: root.uiFont; font.pixelSize: 11; font.underline: tsAddressMouse.containsMouse
+                        MouseArea { id: tsAddressMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.copyToClipboard(root.tsAddress) }
+                    }
+                }
+                Repeater { model: root.tsRunning ? root.tsPeers : []
+                    delegate: RowLayout {
+                        required property var modelData
+                        Layout.fillWidth: true; spacing: 6
+                        Text { text: "●"; color: modelData.online ? root.hot : root.outline; font.pixelSize: 9 }
+                        Text { text: modelData.name + (modelData.os ? "  " + modelData.os : ""); color: modelData.online ? root.rose : root.muted; font.family: root.uiFont; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Text { text: modelData.ip; color: peerMouse.containsMouse ? root.hot : (modelData.online ? root.rose : root.muted); font.family: root.uiFont; font.pixelSize: 11; font.underline: peerMouse.containsMouse
+                            MouseArea { id: peerMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.copyToClipboard(modelData.ip) }
+                        }
+                    }
                 }
             }
         }

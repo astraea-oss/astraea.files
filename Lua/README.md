@@ -45,7 +45,7 @@ and Fastfetch detects the GPU rather than displaying a fixed model name.
 
 The setup uses Hyprland's Lua API, Quickshell/Qt 6, CachyOS Fish defaults,
 Hyprpaper, Hyprlock, PipeWire tools, NetworkManager, UPower, power-profiles-daemon,
-playerctl, brightnessctl and wl-clipboard. The Bluetooth helper uses Python's
+playerctl, brightnessctl, wl-clipboard, and optionally Tailscale and jq. The Bluetooth helper uses Python's
 PyGObject/Gio bindings. Hyprland also starts the distribution's
 `plasma-polkit-agent.service`, KDE Connect and the locally installed PIA client.
 Install the corresponding applications separately.
@@ -65,3 +65,9 @@ Live files were not modified. Hyprpaper uses the bundled static wallpaper.
 
 Image and font assets retain their third-party rights; see
 [ASSETS.md](../ASSETS.md).
+
+## Tailscale
+
+The network panel's Tailscale section needs `tailscale` and `jq`. Run
+`sudo tailscale set --operator=$USER --accept-dns=false` once so the panel can
+control it without a password; MagicDNS stays off because it clashes with PIA's DNS.
