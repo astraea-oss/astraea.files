@@ -19,6 +19,12 @@
 - xsettingsd, Flameshot, and Satty settings.
 - Wallpapers, Iceland and JetBrains Mono fonts, and the custom SDDM theme.
 
+### Tailscale
+
+The network panel's Tailscale section needs `tailscale` and `jq`. Run
+`sudo tailscale set --operator=$USER --accept-dns=false` once so the panel can
+control it without a password; MagicDNS stays off because it clashes with PIA's DNS.
+
 ### Machine-specific notes
 
 display modes until you add monitor blocks based on `hyprctl monitors`. Several
