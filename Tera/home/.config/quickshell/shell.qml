@@ -23,9 +23,9 @@ ShellRoot {
     property bool bluetoothOpen: false
     property bool notificationsOpen: false
     // A pinned notification centre survives outside clicks and other panels,
-    // and reserves its width so tiled windows start at its right edge.
+    // It overlays the leftmost column rather than reserving space, so column
+    // widths never depend on whether it is pinned.
     property bool notificationsPinned: false
-    onNotificationsPinnedChanged: columnWidthSync.restart()
     // Per-device; never synchronised. Persisted so a shell reload keeps it.
     property alias dnd: notificationState.dnd
     property bool mediaOpen: false
@@ -68,6 +68,9 @@ ShellRoot {
     readonly property int panelGap: 16
     readonly property int notificationPanelWidth: 360
     readonly property int hyprGap: 4 // mirrors general.gaps_out in hyprland.lua
+    // Side panels open beside the pinned notification centre, which no longer
+    // reserves space and would otherwise cover them.
+    readonly property int panelLeft: panelGap + (notificationsPinned && notificationsOpen ? hyprGap + notificationPanelWidth : 0)
     property var now: new Date()
     property string nowPlaying: "Nothing playing"
     property string notifications: ""
@@ -423,15 +426,6 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
             root.focusTitleVisible = true;
             focusTitleTimer.restart();
         }
-    }
-    // Pinning changes the selected display's reserved width; let Hyprland rescale its column
-    // width presets so they keep their pixel sizes. Also runs once at startup in case
-    // the shell restarted while pinned. The delay lets the new exclusive zone
-    // reach the compositor first.
-    Timer {
-        id: columnWidthSync
-        interval: 250; running: true
-        onTriggered: Quickshell.execDetached(["hyprctl", "eval", "require(\"/home/tera/.config/hypr/column_widths.lua\").sync()"])
     }
     Timer {
         id: focusTitleTimer
@@ -881,7 +875,7 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
 
     PanelWindow {
         visible: root.controlOpen; screen: bar.screen; anchors { top: true; left: true }
-        margins { left: root.panelGap } exclusiveZone: 0; focusable: false; implicitWidth: 360; implicitHeight: 400; color: "transparent"
+        margins { left: root.panelLeft } exclusiveZone: 0; focusable: false; implicitWidth: 360; implicitHeight: 400; color: "transparent"
         Rectangle { anchors.fill: parent; radius: 8; color: "#f018040a"; border.color: root.outline; border.width: 1
             ColumnLayout { anchors.fill: parent; anchors.margins: 18; spacing: 14
                 Text { text: "CONTROL CENTRE"; color: root.hot; font.family: root.uiFont; font.bold: true; font.pixelSize: 13 }
@@ -912,14 +906,25 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
         MouseArea { anchors { fill: parent; leftMargin: root.barWidth } onClicked: root.closePanels() }
     }
 
+    // Unpinned, a transparent full-screen surface closes the centre on an
+    // outside click. It is a separate surface so pinning never resizes the
+    // panel itself; Hyprland's layer animation would stretch the panel's dark
+    // background across the screen while the surface shrank.
     PanelWindow {
-        // Unpinned, the surface covers the screen so an outside click closes it.
-        // Pinned, it shrinks to the panel and claims an exclusive zone, which
-        // moves the scrolling layout's left edge to the panel's right edge.
-        visible: root.notificationsOpen; screen: bar.screen; anchors { top: true; bottom: true; left: true; right: !root.notificationsPinned }
+        visible: root.notificationsOpen && !root.notificationsPinned; screen: bar.screen
+        anchors { top: true; bottom: true; left: true; right: true }
+        exclusiveZone: 0; focusable: false; color: "transparent"
+        MouseArea { anchors.fill: parent; onClicked: root.notificationsOpen = false }
+    }
+
+    PanelWindow {
+        // Fixed-width panel; pinned or not, it floats over the leftmost tiled
+        // column without reserving space. On the Overlay layer so it always
+        // stacks above the click catcher (Top layer).
+        WlrLayershell.layer: WlrLayer.Overlay
+        visible: root.notificationsOpen; screen: bar.screen; anchors { top: true; bottom: true; left: true }
         implicitWidth: root.hyprGap + root.notificationPanelWidth
-        exclusiveZone: root.notificationsPinned ? implicitWidth : 0; focusable: false; color: "transparent"
-        MouseArea { anchors.fill: parent; enabled: !root.notificationsPinned; onClicked: root.notificationsOpen = false }
+        exclusiveZone: 0; focusable: false; color: "transparent"
         Rectangle { anchors { top: parent.top; bottom: parent.bottom; left: parent.left; leftMargin: root.hyprGap } width: root.notificationPanelWidth; z: 1; radius: 4; color: "#f00e0207"; border.width: 0
             ColumnLayout { anchors.fill: parent; anchors.margins: 14; spacing: 10
                 RowLayout { Layout.fillWidth: true
@@ -971,7 +976,7 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
 
     PanelWindow {
         visible: root.audioOpen; screen: bar.screen; anchors { top: true; bottom: true; left: true }
-        margins { left: root.panelGap } exclusiveZone: 0; focusable: false; implicitWidth: 360; color: "transparent"
+        margins { left: root.panelLeft } exclusiveZone: 0; focusable: false; implicitWidth: 360; color: "transparent"
         Rectangle { anchors.fill: parent; radius: 0; color: "#f00e0207"; border.color: "transparent"
             Flickable { anchors.fill: parent; anchors.margins: 14; clip: true; contentWidth: width; contentHeight: audioContent.height
                 Column {
@@ -1014,7 +1019,7 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
 
     PanelWindow {
         visible: root.networkOpen; screen: bar.screen; anchors { top: true; left: true }
-        margins { left: root.panelGap } exclusiveZone: 0; focusable: false; implicitWidth: 360; implicitHeight: networkColumn.implicitHeight + 28; color: "transparent"
+        margins { left: root.panelLeft } exclusiveZone: 0; focusable: false; implicitWidth: 360; implicitHeight: networkColumn.implicitHeight + 28; color: "transparent"
         Rectangle { anchors.fill: parent; radius: 0; color: "#f00e0207"; border.color: "transparent"
             ColumnLayout { id: networkColumn; anchors.fill: parent; anchors.margins: 14; spacing: 8
                 Text { text: "NETWORK"; color: root.hot; font.family: root.uiFont; font.bold: true; font.pixelSize: 12 }
@@ -1083,7 +1088,7 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
 
     PanelWindow {
         visible: root.bluetoothOpen; screen: bar.screen; anchors { top: true; left: true }
-        margins { left: root.panelGap } exclusiveZone: 0; focusable: false; implicitWidth: 286; implicitHeight: 232; color: "transparent"
+        margins { left: root.panelLeft } exclusiveZone: 0; focusable: false; implicitWidth: 286; implicitHeight: 232; color: "transparent"
         Rectangle { anchors.fill: parent; radius: 0; color: "#f00e0207"; border.color: "transparent"
             ColumnLayout { anchors.fill: parent; anchors.margins: 14; spacing: 8
                 Text { text: "BLUETOOTH"; color: root.hot; font.family: root.uiFont; font.bold: true; font.pixelSize: 12 }
@@ -1107,7 +1112,7 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
 
     PanelWindow {
         visible: root.calendarOpen; screen: bar.screen; anchors { top: true; left: true }
-        margins { left: root.panelGap } exclusiveZone: 0; focusable: false; implicitWidth: 260; implicitHeight: 160; color: "transparent"
+        margins { left: root.panelLeft } exclusiveZone: 0; focusable: false; implicitWidth: 260; implicitHeight: 160; color: "transparent"
         Rectangle { anchors.fill: parent; radius: 4; color: "#f00e0207"; border.color: "transparent"
             Column { anchors.fill: parent; anchors.margins: 12; spacing: 8
                 Item { width: parent.width; height: 14
@@ -1149,7 +1154,7 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
 
     PanelWindow {
         visible: root.mediaOpen; screen: bar.screen; anchors { top: true; left: true }
-        margins { left: root.panelGap } exclusiveZone: 0; focusable: false; implicitWidth: 390; implicitHeight: 255; color: "transparent"
+        margins { left: root.panelLeft } exclusiveZone: 0; focusable: false; implicitWidth: 390; implicitHeight: 255; color: "transparent"
         Rectangle { anchors.fill: parent; radius: 8; color: "#f018040a"; border.color: root.outline
             ColumnLayout { anchors.fill: parent; anchors.margins: 18; spacing: 14
                 Text { text: "NOW PLAYING"; color: root.hot; font.family: root.uiFont; font.bold: true; font.pixelSize: 13 }
@@ -1167,7 +1172,7 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
 
     PanelWindow {
         visible: root.powerOpen; screen: bar.screen; anchors { top: true; left: true }
-        margins { left: root.panelGap } exclusiveZone: 0; focusable: false; implicitWidth: 300; implicitHeight: 250; color: "transparent"
+        margins { left: root.panelLeft } exclusiveZone: 0; focusable: false; implicitWidth: 300; implicitHeight: 250; color: "transparent"
         Rectangle { anchors.fill: parent; radius: 8; color: "#f018040a"; border.color: root.outline
             ColumnLayout { anchors.fill: parent; anchors.margins: 18; spacing: 8
                 Text { text: "SESSION"; color: root.hot; font.family: root.uiFont; font.bold: true; font.pixelSize: 13 }

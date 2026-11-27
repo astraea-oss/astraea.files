@@ -132,9 +132,7 @@ hl.config({
     },
 })
 
--- Applied separately so the width maths sees the gaps configured above.
--- column_widths.lua keeps them pixel-stable when a pinned panel reserves
--- part of the monitor.
+-- Fixed preset widths; see column_widths.lua.
 hl.config({ scrolling = column_widths.scrolling_config() })
 
 ------------------
