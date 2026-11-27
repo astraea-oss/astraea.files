@@ -16,6 +16,24 @@ import Quickshell.Widgets
 ShellRoot {
     id: root
 
+    // Survives shell reloads (not a full Quickshell restart).
+    // KEEP THIS THE FIRST OBJECT IN ShellRoot. Quickshell 0.3.2 matches
+    // ShellRoot's direct children to the previous generation by position, not
+    // reloadableId, and never looks inside non-reloadable wrappers. Any object
+    // added or removed above this one resets it: arrival times are lost and a
+    // new bridge epoch re-posts every notification to the other machines.
+    PersistentProperties {
+        id: notificationState
+        reloadableId: "emberNotificationState"
+        property bool dnd: false
+        // JSON text: JS objects in a var do not carry across a reload.
+        property string times: "{}"
+        property string epoch: ""
+        property string offlineClosures: "[]"
+        // Arrival time (ms) up to which notifications count as seen.
+        property string seenMs: ""
+    }
+
     // Ember desktop shell for the primary display.
     property bool controlOpen: false // retained only for compatibility during testing
     property bool audioOpen: false
@@ -77,6 +95,11 @@ ShellRoot {
     // Arrival times in ms, keyed by notification id; reloads keep the original time.
     readonly property var notificationTimes: JSON.parse(notificationState.times)
     readonly property var notificationHistory: notificationServer.trackedNotifications.values.filter(n => !n.transient)
+    // Dismissals wait a few seconds so they can be undone; until then the
+    // entries are only hidden. Consecutive dismissals join one undo batch.
+    property var pendingDismissIds: []
+    readonly property var visibleNotificationHistory: notificationHistory.filter(n => pendingDismissIds.indexOf(n.id) < 0)
+    readonly property real notificationsSeenMs: Number(notificationState.seenMs) || 0
     readonly property int notificationPopupDuration: 6250
     readonly property int notificationPopupFade: 1000
     property bool notificationSoundEnabled: true
@@ -186,6 +209,84 @@ ShellRoot {
     // Keep a notification in the centre. Pass an arrival time only for a fresh
     // arrival (or a canonical shared time); a reloaded entry passes none so it
     // keeps its recorded time instead of taking the reload time.
+    function queueDismiss(list) {
+        if (!list.length) return;
+        root.pendingDismissIds = root.pendingDismissIds.concat(list.map(n => n.id));
+        dismissCommit.restart();
+    }
+    function commitDismiss() {
+        dismissCommit.stop();
+        const ids = new Set(root.pendingDismissIds);
+        root.pendingDismissIds = [];
+        for (const n of [...notificationServer.trackedNotifications.values])
+            if (ids.has(n.id)) n.dismiss();
+    }
+    function undoDismiss() {
+        dismissCommit.stop();
+        root.pendingDismissIds = [];
+    }
+    function notificationAppName(n) {
+        const raw = n.appName || "Notification";
+        try {
+            const entry = DesktopEntries.heuristicLookup(raw);
+            if (entry && entry.name) return entry.name;
+        } catch (e) {}
+        return raw.charAt(0).toUpperCase() + raw.slice(1);
+    }
+    // Name of the machine a notification came from ("Tera", "Lua"), or "" for
+    // phone notifications. Kept here rather than in EdgeNotificationBridge.qml:
+    // edge-receiver-linux owns that file and reinstalls it (reloading the shell)
+    // whenever the installed copy differs from its bundled one.
+    function notificationSourceName(n) {
+        if (!n || !n.hints) return "";
+        const key = edgeNotificationBridge.copyKey(n);
+        if (n.hints["x-edge-kvm-phone"] || (key && typeof key.instance === "string" && key.instance.startsWith("phone/"))) return "";
+        const origin = key ? key.origin : edgeNotificationBridge.localIdentity;
+        return edgeNotificationBridge.sourceNames[origin] || "";
+    }
+    function sameNotificationSource(a, b) {
+        return a.appName === b.appName && root.notificationSourceName(a) === root.notificationSourceName(b);
+    }
+    // Body markup per the notification spec, plus clickable bare URLs.
+    function notificationBodyMarkup(body) {
+        let text = (body || "").replace(/\r?\n/g, "<br>");
+        if (!/<a\s/i.test(text)) text = text.replace(/(https?:\/\/[^\s<>"]+)/g, '<a href="$1">$1</a>');
+        return text;
+    }
+    // Icon for a notification card: the attached image, then the app icon if
+    // it actually exists, then the icon of the app's desktop entry. Returns ""
+    // when nothing resolves so the card can show a fallback glyph instead of
+    // Quickshell's missing-icon checkerboard.
+    function notificationIconSource(n) {
+        if (n.image) return n.image;
+        const icon = n.appIcon || "";
+        if (icon.startsWith("/")) return "file://" + icon;
+        if (icon.startsWith("file:") || icon.startsWith("image:")) return icon;
+        if (icon) {
+            const path = Quickshell.iconPath(icon, true);
+            if (path) return path;
+        }
+        let entry = null;
+        try {
+            if (n.desktopEntry) entry = DesktopEntries.byId(n.desktopEntry);
+            if (!entry && n.appName) entry = DesktopEntries.heuristicLookup(n.appName);
+        } catch (e) {}
+        if (entry && entry.icon) {
+            const path = Quickshell.iconPath(entry.icon, true);
+            if (path) return path;
+        }
+        return "";
+    }
+    function invokeDefaultAction(n) {
+        for (let i = 0; i < n.actions.length; i++)
+            if (n.actions[i].identifier === "default") { n.actions[i].invoke(); return true; }
+        return false;
+    }
+    function hasDefaultAction(n) {
+        for (let i = 0; i < n.actions.length; i++)
+            if (n.actions[i].identifier === "default") return true;
+        return false;
+    }
     function retainNotification(notification, timestamp) {
         if (timestamp !== undefined) {
             let times = Object.assign({}, root.notificationTimes);
@@ -434,6 +535,15 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
     }
     IpcHandler {
         target: "ember"
+        function toggleNotifications(): void { root.toggle("notificationsOpen"); }
+        function notificationTimes(): string { return notificationState.times; }
+        function notificationEpoch(): string { return notificationState.epoch; }
+        // Repair a recorded arrival time (ms since epoch) for one notification id.
+        function setNotificationTime(id: int, ms: real): void {
+            let times = Object.assign({}, root.notificationTimes);
+            times[id] = ms;
+            notificationState.times = JSON.stringify(times);
+        }
         function toggleLauncher(): void {
             root.launcherOpen = !root.launcherOpen;
             root.launcherQuery = "";
@@ -444,16 +554,14 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
     }
     ListModel { id: notificationPopups; onCountChanged: Qt.callLater(root.releaseTransients) }
 
-    // Survives shell reloads (not a full Quickshell restart).
-    PersistentProperties {
-        id: notificationState
-        reloadableId: "emberNotificationState"
-        property bool dnd: false
-        // JSON text: JS objects in a var do not carry across a reload.
-        property string times: "{}"
-        property string epoch: ""
-        property string offlineClosures: "[]"
+    Timer { id: dismissCommit; interval: 5000; onTriggered: root.commitDismiss() }
+    // Everything that arrived before the centre has been open for a moment counts as seen.
+    Timer {
+        interval: 1500; repeat: true; running: root.notificationsOpen
+        onTriggered: notificationState.seenMs = String(Date.now())
     }
+    Component.onCompleted: if (notificationState.seenMs === "") notificationState.seenMs = String(Date.now())
+
 
     NotificationServer {
         id: notificationServer
@@ -646,7 +754,7 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
                 EmberButton { width: root.barWidth; height: 32; glyph: root.ethernetIcon(); glyphColor: root.ethernetState === "connected" ? root.rose : root.muted; iconSize: 15; chrome: false; compact: true; onPressed: root.toggle("networkOpen") }
                 EmberButton { width: root.barWidth; height: 32; glyph: "󰂯"; glyphColor: root.bluetooth === "Bluetooth on" ? root.rose : root.muted; iconSize: 14; chrome: false; compact: true; onPressed: root.toggle("bluetoothOpen") }
                 EmberButton { width: root.barWidth; height: 32; glyph: root.volumeIcon(); glyphColor: root.rose; iconSize: 14; chrome: false; compact: true; onPressed: root.toggle("audioOpen") }
-                EmberButton { width: root.barWidth; height: 32; glyph: root.dnd ? "󰂛" : "󰂚"; label: root.notificationHistory.length > 0 ? root.notificationHistory.length : ""; glyphColor: root.muted; iconSize: 14; chrome: false; compact: true; onPressed: root.toggle("notificationsOpen") }
+                EmberButton { width: root.barWidth; height: 32; glyph: root.dnd ? "󰂛" : "󰂚"; label: root.visibleNotificationHistory.length > 0 ? root.visibleNotificationHistory.length : ""; glyphColor: root.muted; iconSize: 14; chrome: false; compact: true; onPressed: root.toggle("notificationsOpen") }
                 EmberButton { width: root.barWidth; height: 32; glyph: "󰐥"; glyphColor: root.hot; iconSize: 14; chrome: false; compact: true; onPressed: root.toggle("powerOpen") }
             }
         }
@@ -927,14 +1035,11 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
         exclusiveZone: 0; focusable: false; color: "transparent"
         Rectangle { anchors { top: parent.top; bottom: parent.bottom; left: parent.left; leftMargin: root.hyprGap } width: root.notificationPanelWidth; z: 1; radius: 4; color: "#f00e0207"; border.width: 0
             ColumnLayout { anchors.fill: parent; anchors.margins: 14; spacing: 10
-                RowLayout { Layout.fillWidth: true
+                RowLayout { Layout.fillWidth: true; spacing: 4
                     Text { text: "NOTIFICATIONS"; color: root.hot; font.bold: true; font.family: root.uiFont; font.pixelSize: 13; Layout.fillWidth: true }
+                    EmberButton { glyph: root.dnd ? "󰂛" : "󰂚"; glyphColor: root.dnd ? root.hot : root.rose; active: root.dnd; onPressed: root.dnd = !root.dnd }
                     EmberButton { glyph: root.notificationsPinned ? "󰐃" : "󰐄"; glyphColor: root.notificationsPinned ? root.hot : root.rose; active: root.notificationsPinned; onPressed: root.notificationsPinned = !root.notificationsPinned }
-                    EmberButton { glyph: "󰎟"; label: "Clear"; onPressed: { let all = root.notificationHistory; for (let i = 0; i < all.length; i++) all[i].dismiss() } }
-                }
-                RowLayout { Layout.fillWidth: true
-                    Text { text: "Do Not Disturb"; color: root.rose; font.family: root.uiFont; font.pixelSize: 12; Layout.fillWidth: true }
-                    Switch { checked: root.dnd; onToggled: root.dnd = checked }
+                    EmberButton { glyph: "󰎟"; label: "Clear"; onPressed: root.queueDismiss(root.visibleNotificationHistory) }
                 }
                 Rectangle { Layout.fillWidth: true; height: 1; color: root.outline }
                 ListView {
@@ -943,32 +1048,117 @@ tailscale status --json 2>/dev/null | jq -c '{state: .BackendState, auth: (.Auth
                     // Newest first; the server tracks notifications in arrival order.
                     // ScriptModel diffs the array, so dismissing one entry removes just that
                     // row instead of resetting the view (and scroll position) to the top.
-                    model: ScriptModel { values: [...root.notificationHistory].reverse() }
+                    model: ScriptModel { values: [...root.visibleNotificationHistory].reverse() }
                     delegate: Item {
+                        id: notificationRow
                         required property var modelData
+                        property bool expanded: false
+                        readonly property bool critical: modelData.urgency === NotificationUrgency.Critical
+                        readonly property bool unread: (root.notificationTimes[modelData.id] || 0) > root.notificationsSeenMs
+                        readonly property string source: root.notificationSourceName(modelData)
                         width: notificationList.width; implicitHeight: notificationBody.implicitHeight + 20
-                        Rectangle { anchors { left: parent.left; top: parent.top; bottom: parent.bottom; right: notificationDismissTile.left; rightMargin: 3 } radius: 4
-                        color: root.surfaceRaised; border.color: "#5e0e22"
+                        Rectangle { id: notificationCard; anchors { left: parent.left; top: parent.top; bottom: parent.bottom; right: notificationDismissTile.left; rightMargin: 3 } radius: 4
+                        color: cardMouse.containsMouse ? "#2f0915" : root.surfaceRaised
+                        border.color: notificationRow.critical || cardMouse.containsMouse ? root.ember : "#5e0e22"
+                        // Left click runs the app's default action; right click dismisses
+                        // everything from the same app and machine (undoable).
+                        MouseArea {
+                            id: cardMouse
+                            anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            cursorShape: root.hasDefaultAction(notificationRow.modelData) ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: mouse => {
+                                const n = notificationRow.modelData;
+                                if (mouse.button === Qt.RightButton)
+                                    root.queueDismiss(root.visibleNotificationHistory.filter(o => root.sameNotificationSource(o, n)));
+                                else
+                                    root.invokeDefaultAction(n);
+                            }
+                        }
+                        Rectangle { visible: notificationRow.critical; anchors { left: parent.left; top: parent.top; bottom: parent.bottom } width: 3; radius: 2; color: root.ember }
+                        Rectangle { visible: notificationRow.unread && !notificationRow.critical; anchors { left: parent.left; top: parent.top; bottom: parent.bottom; topMargin: 10; bottomMargin: 10 } width: 2; radius: 1; color: root.hot }
                         RowLayout { id: notificationBody; anchors { left: parent.left; right: parent.right; top: parent.top; margins: 10 } spacing: 9
-                            IconImage { source: Quickshell.iconPath(modelData.appIcon || modelData.desktopEntry); width: 28; height: 28 }
-                            ColumnLayout { Layout.fillWidth: true; spacing: 3
-                                RowLayout { Layout.fillWidth: true; spacing: 8
-                                    Text { text: edgeNotificationBridge.appLabel(modelData); textFormat: Text.PlainText; color: root.muted; font.family: root.uiFont; font.pixelSize: 10; Layout.fillWidth: true; elide: Text.ElideRight }
-                                    Text { text: root.notificationTimestamp(root.notificationTimes[modelData.id]); color: root.statusText; font.family: root.uiFont; font.pixelSize: 9; Layout.alignment: Qt.AlignTop }
+                            Item {
+                                readonly property string iconSource: root.notificationIconSource(notificationRow.modelData)
+                                implicitWidth: 28; implicitHeight: 28
+                                IconImage { anchors.fill: parent; visible: parent.iconSource !== ""; source: parent.iconSource }
+                                Rectangle { anchors.fill: parent; visible: parent.iconSource === ""; radius: 4; color: "#3a0a1a"; border.color: root.outline
+                                    Text { anchors.centerIn: parent; text: "󰂚"; color: root.ember; font.pixelSize: 16 }
                                 }
-                                Text { text: modelData.summary; color: root.rose; font.family: root.uiFont; font.bold: true; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                                Text { visible: modelData.body.length > 0; text: modelData.body; color: root.muted; font.family: root.uiFont; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+                            }
+                            ColumnLayout { Layout.fillWidth: true; spacing: 3
+                                RowLayout { Layout.fillWidth: true; spacing: 6
+                                    Text { text: root.notificationAppName(notificationRow.modelData); textFormat: Text.PlainText; color: root.muted; font.family: root.uiFont; font.pixelSize: 10; elide: Text.ElideRight; Layout.maximumWidth: implicitWidth; Layout.fillWidth: true }
+                                    Text { visible: notificationRow.source !== ""; text: "· " + notificationRow.source; textFormat: Text.PlainText; color: root.statusText; opacity: 0.7; font.family: root.uiFont; font.pixelSize: 10 }
+                                    Item { Layout.fillWidth: true }
+                                    Rectangle { visible: notificationRow.critical; color: root.ember; radius: 2; implicitWidth: criticalLabel.implicitWidth + 10; implicitHeight: criticalLabel.implicitHeight + 2
+                                        Text { id: criticalLabel; anchors.centerIn: parent; text: "CRITICAL"; color: "white"; font.family: root.uiFont; font.bold: true; font.pixelSize: 9 }
+                                    }
+                                    Text { text: root.notificationTimestamp(root.notificationTimes[notificationRow.modelData.id] || Number(notificationRow.modelData.hints["x-edge-kvm-posted-ms"]) || 0); color: root.statusText; font.family: root.uiFont; font.pixelSize: 9 }
+                                }
+                                Text { text: notificationRow.modelData.summary; textFormat: Text.PlainText; color: root.rose; font.family: root.uiFont; font.bold: true; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                                Text {
+                                    id: notificationBodyText
+                                    visible: notificationRow.modelData.body.length > 0
+                                    text: root.notificationBodyMarkup(notificationRow.modelData.body)
+                                    textFormat: Text.StyledText; linkColor: root.hot
+                                    color: root.muted; font.family: root.uiFont; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap
+                                    maximumLineCount: notificationRow.expanded ? 1000 : 4; elide: Text.ElideRight
+                                    onLinkActivated: link => Qt.openUrlExternally(link)
+                                    HoverHandler { cursorShape: notificationBodyText.hoveredLink ? Qt.PointingHandCursor : undefined }
+                                }
+                                Text {
+                                    visible: notificationBodyText.truncated || notificationRow.expanded
+                                    text: notificationRow.expanded ? "Show less ▴" : "Show more ▾"
+                                    color: moreMouse.containsMouse ? root.hot : root.statusText; font.family: root.uiFont; font.pixelSize: 10
+                                    MouseArea { id: moreMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: notificationRow.expanded = !notificationRow.expanded }
+                                }
+                                Flow {
+                                    Layout.fillWidth: true; Layout.topMargin: 3; spacing: 5
+                                    visible: actionRepeater.count > 0
+                                    Repeater {
+                                        id: actionRepeater
+                                        model: [...notificationRow.modelData.actions].filter(a => a.identifier !== "default" && a.text)
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            implicitWidth: actionText.implicitWidth + 16; implicitHeight: 20; radius: 2
+                                            color: "#1c050c"; border.color: actionMouse.containsMouse ? root.hot : root.outline
+                                            Text { id: actionText; anchors.centerIn: parent; text: parent.modelData.text; textFormat: Text.PlainText; color: actionMouse.containsMouse ? root.hot : root.rose; font.family: root.uiFont; font.pixelSize: 10 }
+                                            MouseArea { id: actionMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: parent.modelData.invoke() }
+                                        }
+                                    }
+                                }
                             }
                         }
                         }
                         // Full-height dismiss tile beside the card, split off by a small gap of
-                        // panel background; same total width as the old inline button.
+                        // panel background. Its fixed column lets repeated clicks on one spot
+                        // keep dismissing the next card as it moves up.
                         Rectangle { id: notificationDismissTile; width: 30; anchors { top: parent.top; bottom: parent.bottom; right: parent.right } radius: 4
                             color: root.surfaceRaised; border.color: "#5e0e22"
-                            EmberButton { glyph: "󰅖"; compact: true; anchors { fill: parent; margins: 1 } onPressed: modelData.dismiss() }
+                            EmberButton { glyph: "󰅖"; compact: true; anchors { fill: parent; margins: 1 } onPressed: root.queueDismiss([notificationRow.modelData]) }
                         }
                     }
                     Text { anchors.centerIn: parent; visible: notificationList.count === 0; text: "Nothing to see here"; color: root.muted; font.family: root.uiFont; font.pixelSize: 13 }
+                }
+                // Undo lives in its own row so it never covers the dismiss column.
+                Rectangle {
+                    Layout.fillWidth: true; implicitHeight: 34; radius: 4; clip: true
+                    visible: root.pendingDismissIds.length > 0
+                    color: "#3a0a1a"; border.color: root.ember
+                    RowLayout { anchors { fill: parent; leftMargin: 10; rightMargin: 6 } spacing: 8
+                        Text { text: "Dismissed " + root.pendingDismissIds.length; color: root.rose; font.family: root.uiFont; font.pixelSize: 11; Layout.fillWidth: true }
+                        EmberButton { label: "Undo"; labelColor: root.hot; onPressed: root.undoDismiss() }
+                    }
+                    Rectangle {
+                        id: undoProgress
+                        anchors { left: parent.left; bottom: parent.bottom } height: 2; color: root.hot
+                        width: parent.width
+                        NumberAnimation on width { id: undoProgressAnim; from: undoProgress.parent.width; to: 0; duration: dismissCommit.interval; running: false }
+                    }
+                    Connections {
+                        target: root
+                        function onPendingDismissIdsChanged() { if (root.pendingDismissIds.length > 0) undoProgressAnim.restart(); }
+                    }
                 }
             }
         }
